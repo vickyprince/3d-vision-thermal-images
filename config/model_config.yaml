@@ -1,0 +1,26 @@
+data:
+  train_path: "/home/nfs/inf6/data/datasets/ThermalDBs/Freiburg/train"
+  val_path: "/home/nfs/inf6/data/datasets/ThermalDBs/Freiburg/val"
+  test_path: "/home/nfs/inf6/data/datasets/ThermalDBs/Freiburg/test"
+  annotations_path: "data/annotations"
+  img_width: 224
+  img_height: 224
+  num_workers: 4
+
+# Training configuration
+training:
+  batch_size: 16
+  epochs: 50
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  print_freq: 10
+  save_freq: 5
+
+# Evaluation configuration
+evaluation:
+  batch_size: 16
+  vis_samples: 10
+
+# AIS test data configuration
+ais_test:
+  data_path: "/home/nfs/inf6/data/datasets/ThermalDBs/AIS"
