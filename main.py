@@ -9,8 +9,6 @@ from pathlib import Path
 import glob
 import numpy as np
 import torch
-from utils.visualization import visualize_depth_map
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Thermal 3D Vision Project')
@@ -36,13 +34,6 @@ def main(args):
         ANNOTATION_DIR = "data/annotations"
         NUM_TO_VISUALIZE = 10
 
-        annotation_files = sorted(glob.glob(os.path.join(ANNOTATION_DIR, "*.npy")))[:NUM_TO_VISUALIZE]
-        print(len(annotation_files))
-        for i, ann_file in enumerate(annotation_files):
-            annotation = np.load(ann_file, allow_pickle=True).item()
-            depth = annotation["depth1"]
-            save_path = os.path.join("data/visualisation", f"depth_map_{i}.png")
-            visualize_depth_map(depth, save_path=save_path)
 
     if args.mode == 'generate_annotations':
         # Generate pseudo-GT annotations

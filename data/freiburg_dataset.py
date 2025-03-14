@@ -81,50 +81,58 @@ class FreiburgThermalDataset(Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        sample = self.samples[idx]
-        thermal_path = sample['thermal_path']
-        rgb_path = sample['rgb_path']
+        try:
 
-        # Load IR image (can be 16-bit or 8-bit) and convert to float
-        thermal_img = cv2.imread(thermal_path, cv2.IMREAD_ANYDEPTH)
-        if thermal_img is None:
-            raise RuntimeError(f"Failed to load thermal image: {thermal_path}")
-        thermal_img = thermal_img.astype(np.float32)
-        # Normalize (assuming 16-bit image)
-        thermal_img /= 65535.0  
-        # Convert to 3 channels by replication
-        thermal_img_3ch = np.stack([thermal_img, thermal_img, thermal_img], axis=-1)
+            sample = self.samples[idx]
+            thermal_path = sample['thermal_path']
+            rgb_path = sample['rgb_path']
 
-        # Load RGB image (BGR to RGB conversion)
-        rgb_img = cv2.imread(rgb_path, cv2.IMREAD_COLOR)
-        if rgb_img is None:
-            raise RuntimeError(f"Failed to load RGB image: {rgb_path}")
-        rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_BGR2RGB)
+            if not os.path.exists(rgb_path):
+                print(f"RGB file does not exist: {rgb_path}")
+                return None
+            if not os.path.exists(thermal_path):
+                print(f"Thermal file does not exist: {thermal_path}")
+                return None
 
-        # Optional resizing if img_size is provided (img_size is (width, height))
-        if self.img_size is not None:
-            thermal_img_3ch = cv2.resize(thermal_img_3ch, self.img_size)
-            rgb_img = cv2.resize(rgb_img, self.img_size)
+            # Load IR image (can be 16-bit or 8-bit) and convert to float
+            thermal_img = cv2.imread(thermal_path, cv2.IMREAD_ANYDEPTH)
+            if thermal_img is None:
+                raise RuntimeError(f"Failed to load thermal image: {thermal_path}")
+            thermal_img = thermal_img.astype(np.float32)
+            # Normalize (assuming 16-bit image)
+            thermal_img /= 65535.0  
+            # Convert to 3 channels by replication
+            thermal_img_3ch = np.stack([thermal_img, thermal_img, thermal_img], axis=-1)
 
-        # Apply transform if provided, else convert to torch tensor
-        if self.transform:
-            thermal_img_3ch = self.transform(thermal_img_3ch)
-            rgb_img = self.transform(rgb_img)
-        else:
-            thermal_img_3ch = torch.from_numpy(thermal_img_3ch).permute(2, 0, 1).float()
-            rgb_img = torch.from_numpy(rgb_img).permute(2, 0, 1).float()
+            # Load RGB image (BGR to RGB conversion)
+            rgb_img = cv2.imread(rgb_path, cv2.IMREAD_COLOR)
+            if rgb_img is None:
+                raise RuntimeError(f"Failed to load RGB image: {rgb_path}")
+            rgb_img = cv2.cvtColor(rgb_img, cv2.COLOR_BGR2RGB)
 
-        # Pad the images so that their height and width are multiples of 16
-        thermal_img_3ch = pad_to_multiple_tensor(thermal_img_3ch, multiple=16)
-        rgb_img = pad_to_multiple_tensor(rgb_img, multiple=16)
+            # Optional resizing if img_size is provided (img_size is (width, height))
+            if self.img_size is not None:
+                thermal_img_3ch = cv2.resize(thermal_img_3ch, self.img_size)
+                rgb_img = cv2.resize(rgb_img, self.img_size)
 
-        # Dummy intrinsics (can be replaced by real calibration)
-        intrinsics = np.eye(3, dtype=np.float32)
+            # Apply transform if provided, else convert to torch tensor
+            if self.transform:
+                thermal_img_3ch = self.transform(thermal_img_3ch)
+                rgb_img = self.transform(rgb_img)
+            else:
+                thermal_img_3ch = torch.from_numpy(thermal_img_3ch).permute(2, 0, 1).float()
+                rgb_img = torch.from_numpy(rgb_img).permute(2, 0, 1).float()
 
-        return {
-            'thermal': thermal_img_3ch,  # 3-channel IR image
-            'thermal_path': thermal_path,
-            'rgb': rgb_img,              # RGB image
-            'rgb_path': rgb_path,
-            'intrinsics': intrinsics
-        }
+            # Pad the images so that their height and width are multiples of 16
+            thermal_img_3ch = pad_to_multiple_tensor(thermal_img_3ch, multiple=16)
+            rgb_img = pad_to_multiple_tensor(rgb_img, multiple=16)
+
+            return {
+                'thermal': thermal_img_3ch,  # 3-channel IR image
+                'thermal_path': thermal_path,
+                'rgb': rgb_img,              # RGB image
+                'rgb_path': rgb_path,
+            }
+        except Exception as e:
+            print(f"Error loading sample {idx}: {e}")
+            return None

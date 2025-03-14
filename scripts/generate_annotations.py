@@ -4,183 +4,142 @@ import torch.nn.functional as F
 import numpy as np
 import argparse
 import os
-import sys
+import yaml
 from tqdm import tqdm
-import yaml  # for reading calibration YAML file
-
 from torch.utils.data import DataLoader
-from mast3r.model import AsymmetricMASt3R
-from data.freiburg_dataset import FreiburgThermalDataset
-from utils.camera_utils import compute_pose_from_pointmaps
-from utils.visualization import visualize_depth_map
-from dust3r.inference import inference
-from utils.helpers import get_pointmap
+from utils.visualization import visualize_annotation_correctness
+from utils.helpers import get_pointmap, compute_relative_pose_from_pointmaps, custom_collate
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Generate pseudo-GT annotations using MASt3R with YAML calibrations.')
-    parser.add_argument('--data_path', type=str, required=True, help='Path to Freiburg dataset')
-    parser.add_argument('--output_path', type=str, required=True, help='Path to save annotations')
-    parser.add_argument('--calib_yaml', type=str, required=True, help='Path to calibration YAML file')
-    parser.add_argument('--batch_size', type=int, default=1, help='Batch size (for DataLoader)')
-    parser.add_argument('--num_workers', type=int, default=4, help='Number of workers')
-    parser.add_argument('--device', type=str, default='cuda', help='Device to use (cuda or cpu)')
+    parser = argparse.ArgumentParser(description='Generate pseudo-GT with relative pose, depth, intrinsics.')
+    parser.add_argument('--data_path', type=str, required=True, help='Path to your dataset')
+    parser.add_argument('--output_path', type=str, required=True, help='Where to save annotations')
+    parser.add_argument('--calib_yaml', type=str, required=True, help='YAML with camera intrinsics')
+    parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--num_workers', type=int, default=4)
+    parser.add_argument('--device', type=str, default='cuda')
     return parser.parse_args()
 
-def pad_to_multiple(img, multiple=16):
-    """
-    Pads a 4D tensor (1, C, H, W) on the right and bottom so that its H and W become multiples of 'multiple'.
-    Returns the padded tensor and the original (H, W) to allow later cropping.
-    """
-    _, _, h, w = img.shape
-    new_h = ((h + multiple - 1) // multiple) * multiple
-    new_w = ((w + multiple - 1) // multiple) * multiple
-    pad_bottom = new_h - h
-    pad_right = new_w - w
-    padded = F.pad(img, (0, pad_right, 0, pad_bottom))
-    return padded, h, w
-
 def load_calibrations(calib_yaml):
-    """Load calibration data from a YAML file."""
     with open(calib_yaml, "r") as f:
         calib = yaml.safe_load(f)
     return calib
 
-def get_calibration(calib, image_path):
+def get_intrinsics_from_yaml(calib, image_path):
     """
-    Select calibration based on the image file name.
-    If "fl_rgb" is in the filename, we assume left-camera calibration; otherwise, right.
+    if the filename contains 'fl_rgb', use 'left' intrinsics,
+    otherwise 'right'
     """
     base = os.path.basename(image_path).lower()
     if "fl_rgb" in base:
         intrinsics = np.array(calib["left"]["intrinsics"])
-        pose = np.eye(4)
     else:
         intrinsics = np.array(calib["right"]["intrinsics"])
-        # Use the provided transformation matrix if available
-        pose = np.array(calib["right"].get("T_cn_cnm1", np.eye(4)))
-    return intrinsics, pose
+    return intrinsics
 
 def main(args):
-    # Create output directory
-    print(f"Creating output directory: {args.output_path}")
+    # Load calibration
+    calib = load_calibrations(args.calib_yaml)
     os.makedirs(args.output_path, exist_ok=True)
     
-    # Load calibration from YAML file
-    calib = load_calibrations(args.calib_yaml)
-    
-    # Initialize MASt3R model
-    print("Loading MASt3R model...")
-    model = AsymmetricMASt3R.from_pretrained('checkpoints/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth')
-    print(f"Moving model to device: {args.device}")
-    device = args.device
+    # Create a directory for visualizations
+    viz_dir = os.path.join(args.output_path, "visualizations")
+    os.makedirs(viz_dir, exist_ok=True)
+
+    # Load pretrained MASt3r model
+    from mast3r.model import AsymmetricMASt3R
+    from dust3r.inference import inference
+    model = AsymmetricMASt3R.from_pretrained('checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth')
     model = model.to(args.device)
     model.eval()
-    print("Model ready")
-    
-    # Load dataset; FreiburgThermalDataset returns keys: 'img1', 'img2', 'frame1_path', 'frame2_path', and 'intrinsics'
-    print(f"Loading dataset from: {args.data_path}")
+
+    # Create  dataset & dataloader 
+    from data.freiburg_dataset import FreiburgThermalDataset
+    from utils.helpers import custom_collate
     dataset = FreiburgThermalDataset(args.data_path)
-    print(f"Dataset loaded with {len(dataset)} samples")
-    
-    dataloader = DataLoader(
-        dataset, 
-        batch_size=args.batch_size, 
-        shuffle=False,
-        num_workers=args.num_workers
-    )
-    print(f"DataLoader created with {len(dataloader)} batches")
-    
-    # Generate annotations using inference()
-    print("Starting annotation generation...")
+    dataloader = DataLoader(dataset, 
+                            batch_size=args.batch_size, 
+                            shuffle=False,
+                            num_workers=args.num_workers,
+                            collate_fn=custom_collate)
+
+    # Iterate over the data
     with torch.no_grad():
-        for batch_idx, batch in enumerate(tqdm(dataloader, desc="Processing batches")):
-            if batch is None:
+        for batch_idx, batch in enumerate(tqdm(dataloader, desc="Generating Annotations")):
+            if not batch or 'rgb' not in batch:
                 continue
 
-            # Inside your main loop:
-            if 'rgb' in batch:
-                images = batch['rgb']          # [B, 3, H, W]
-                paths = batch.get('rgb_path', None)
-                thermal_paths = batch.get('thermal_path', None)
-            else:
-                images = batch['img1']         # fallback if 'rgb' key is missing
-                paths = batch.get('frame1_path', None)
-                thermal_paths = batch.get('thermal_path', None)
-
-            if paths is None or len(paths) == 0:
-                print("Warning: No image path found, skipping.")
+            images = batch['rgb']  # [B, 3, H, W]
+            paths = batch.get('rgb_path', [])
+            thermal_paths = batch.get('thermal_path', [])
+            # Make sure we have at least two rgb images and one thermal image
+            if len(paths) < 2 or len(thermal_paths) < 1:
                 continue
 
-            if thermal_paths is None or len(thermal_paths) == 0 or not os.path.isfile(thermal_paths[0]):
-                print("Warning: Thermal path missing for sample, skipping.")
-                continue
+            # For demonstration, we take the first two images
+            img1 = images[0].to(args.device)
+            img2 = images[1].to(args.device)
+            base_name1 = os.path.splitext(os.path.basename(paths[0]))[0]
 
-            # Retrieve calibration parameters using the first image path.
-            intrinsics, calib_pose = get_calibration(calib, paths[0])
-            img_path = paths[0]
+            # If your images are in [0..255], scale them to [0..1]
+            if img1.max() > 1.0:
+                img1 = img1 / 255.0
+            if img2.max() > 1.0:
+                img2 = img2 / 255.0
 
-            # Duplicate image if batch contains one image.
-            if len(images) == 1:
-                img1 = images[0].to(device)
-                img2 = img1.clone()
-                base_name1 = os.path.splitext(os.path.basename(paths[0]))[0]
-                base_name2 = base_name1 + "_dup"
-            else:
-                img1 = images[0].to(device)
-                img2 = images[1].to(device)
-                base_name1 = os.path.splitext(os.path.basename(paths[0]))[0]
-                base_name2 = os.path.splitext(os.path.basename(paths[1]))[0]
-
-            # Create a dummy "instance" tensor (dummy mask) that matches the image dimensions.
-            dummy_instance = torch.zeros((1, 1, img1.shape[-2], img1.shape[-1]), device=device)
-
-            # Build the image pair for inference.
+            # Build pair for MASt3r inference
+            dummy_instance = torch.zeros((1,1,img1.shape[-2],img1.shape[-1]), device=args.device)
             image_pair = [(
                 {"img": img1.unsqueeze(0), "instance": dummy_instance},
                 {"img": img2.unsqueeze(0), "instance": dummy_instance}
             )]
-            
-            torch.cuda.empty_cache()
-            # Run inference.
-            out = inference(image_pair, model, device, batch_size=1, verbose=False)
 
-            # Retrieve predicted pointmaps using the helper 'get_pointmap'.
+            out = inference(image_pair, model, args.device, batch_size=1, verbose=False)
             if 'pred1' not in out or 'pred2' not in out:
-                print(f"Inference output missing keys for sample {base_name1}, skipping.")
-                continue
-            pm1_dict = out.get("pred1", {})
-            pm2_dict = out.get("pred2", {})
-            if pm1_dict is None or pm2_dict is None:
-                print(f"Pointmap keys missing for sample {base_name1}, skipping.")
                 continue
 
-            pointmap1 = get_pointmap(pm1_dict)  # expected shape [1, 3, H, W]
-            pointmap2 = get_pointmap(pm2_dict)
+            pm1_dict = out['pred1']
+            pm2_dict = out['pred2']
 
-            # Extract depth values (Z channel) from both pointmaps.
-            depth_value_1 = pointmap1[0, 2, :, :].cpu().numpy()  # shape: [H, W]
-            depth_value_2 = pointmap2[0, 2, :, :].cpu().numpy()
+            pm1 = get_pointmap(pm1_dict)  # shape [1, 3, H, W]
+            pm2 = get_pointmap(pm2_dict)  # shape [1, 3, H, W]
 
-            # Build annotation dictionary with the desired keys.
+            # Convert to numpy
+            pm1_np = pm1[0].cpu().numpy()  # [3, H, W]
+            pm2_np = pm2[0].cpu().numpy()  # [3, H, W]
+
+            depth_value_1 = pm1_np[..., 2]
+
+            # Relative pose: assume first image is identity, compute second from pointmaps
+            relative_pose_1_to_2 = compute_relative_pose_from_pointmaps(pm1_np, pm2_np)
+            pose1 = np.eye(4)  # canonical
+
+            # Intrinsics from calibration
+            intrinsics = get_intrinsics_from_yaml(calib, paths[0])
+            fx, fy, cx, cy = intrinsics
+            intrinsics = np.array([
+                [fx, 0,  cx],
+                [0,  fy, cy],
+                [0,  0,   1 ]
+            ])
+
+            # Build and save annotation
             annotation = {
-                'pointmap1': pointmap1[0].cpu().numpy(),  # [3, H, W]
-                'pointmap2': pointmap2[0].cpu().numpy(),
-                'depth_value_1': depth_value_1,
-                'depth_value_2': depth_value_2,
-                'pose': calib_pose,
-                'K': intrinsics,
-                'frame1_path': img_path
+                'pose1': pose1,                        # identity
+                'pose2': relative_pose_1_to_2,         # from pointmaps
+                'depth_value_1': depth_value_1,        # Z of first pointmap
+                'intrinsics': intrinsics,
+                'pointmap1': pm1_np,                   # optional
+                'pointmap2': pm2_np,                   # optional
+                'frame1_path': paths[0]                # for visualization title
             }
-            ann_id = f"{base_name1}"
-            np.save(os.path.join(args.output_path, f"{ann_id}.npy"), annotation)
+            ann_out_path = os.path.join(args.output_path, f"{base_name1}.npy")
+            np.save(ann_out_path, annotation)
 
-            # Optionally visualize the depth map from the first image.
-            visualize_depth_map(
-                depth_value_1,
-                os.path.join(args.output_path, f"{ann_id}_depth.png")
-            )
-    
-    print("Annotation generation complete.")
+            # Visualize annotation and save visualization image (do not show interactively)
+            viz_path = os.path.join(viz_dir, f"{base_name1}_viz.png")
+            visualize_annotation_correctness(annotation, paths[0], thermal_paths[0], save_path=viz_path)
+            print(f"Saved visualization: {viz_path}")
 
 if __name__ == "__main__":
     args = parse_args()
