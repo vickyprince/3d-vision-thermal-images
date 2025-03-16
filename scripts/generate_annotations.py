@@ -15,7 +15,7 @@ def parse_args():
     parser.add_argument('--data_path', type=str, required=True, help='Path to your dataset')
     parser.add_argument('--output_path', type=str, required=True, help='Where to save annotations')
     parser.add_argument('--calib_yaml', type=str, required=True, help='YAML with camera intrinsics')
-    parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--batch_size', type=int, default=2)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--device', type=str, default='cuda')
     return parser.parse_args()
@@ -76,7 +76,6 @@ def main(args):
             if len(paths) < 2 or len(thermal_paths) < 1:
                 continue
 
-            # For demonstration, we take the first two images
             img1 = images[0].to(args.device)
             img2 = images[1].to(args.device)
             base_name1 = os.path.splitext(os.path.basename(paths[0]))[0]
@@ -137,9 +136,10 @@ def main(args):
             np.save(ann_out_path, annotation)
 
             # Visualize annotation and save visualization image (do not show interactively)
-            viz_path = os.path.join(viz_dir, f"{base_name1}_viz.png")
-            visualize_annotation_correctness(annotation, paths[0], thermal_paths[0], save_path=viz_path)
-            print(f"Saved visualization: {viz_path}")
+            if batch_idx % 100 == 0:
+                viz_path = os.path.join(viz_dir, f"{base_name1}_viz.png")
+                visualize_annotation_correctness(annotation, paths[0], thermal_paths[0], save_path=viz_path)
+                print(f"Saved visualization: {viz_path}")
 
 if __name__ == "__main__":
     args = parse_args()

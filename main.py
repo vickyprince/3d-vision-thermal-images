@@ -1,6 +1,7 @@
 import sys
+import os
 sys.path.append('/home/user/victorv1/Cuda/3d-vision-thermal-images/mast3r/dust3r/croco')
-
+sys.path.append(os.path.join(os.path.dirname(__file__), 'mast3r'))
 # main.py
 import argparse
 import os

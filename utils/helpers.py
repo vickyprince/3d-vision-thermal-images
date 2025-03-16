@@ -7,7 +7,6 @@ def get_pointmap(pred):
             return pred[key]
     raise KeyError("No recognized pointmap key found. Keys: " + str(list(pred.keys())))
 
-
 def umeyama_alignment(points1, points2):
     """
     Computes the 4x4 rigid transformation that aligns points2 onto points1
@@ -63,6 +62,7 @@ def compute_relative_pose_from_pointmaps(pointmap1, pointmap2):
     T = umeyama_alignment(pts1, pts2)
     return T
 
+
 def custom_collate(batch):
-    # Simple pass-through to default_collate, or implement your own logic
+    batch = [item for item in batch if item is not None]
     return default_collate(batch)
