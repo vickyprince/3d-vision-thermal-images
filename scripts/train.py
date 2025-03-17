@@ -88,13 +88,47 @@ def main(args):
     )
 
     batch = next(iter(train_loader))
-    print("Keys in batch:", batch.keys())
-    print("img1 shape:", batch['img1'].shape)  # Expected: [B, 3, H, W]
-    print("img2 shape:", batch['img2'].shape)  # Expected: [B, 3, H, W]
+    img1 = batch['img1']  # [B, 3, H, W]
+    img2 = batch['img2']  # [B, 3, H, W]
+    gt_pointmap1 = batch['gt_pointmap1']  # [B, 3, H, W]
+    gt_pointmap2 = batch['gt_pointmap2']  # [B, 3, H, W]
+    gt_depth = batch['gt_depth']         # [B, 1, H, W]
 
-    # Check value ranges (for normalization, etc.)
-    print("img1 min, max:", batch['img1'].min().item(), batch['img1'].max().item())
-    print("img2 min, max:", batch['img2'].min().item(), batch['img2'].max().item())
+    print("img1 shape:", img1.shape)
+    print("img2 shape:", img2.shape)
+    print("gt_pointmap1 shape:", gt_pointmap1.shape)
+    print("gt_pointmap2 shape:", gt_pointmap2.shape)
+    print("gt_depth shape:", gt_depth.shape)
+
+    # Optionally visualize the first sample in this batch
+    import matplotlib.pyplot as plt
+    import torchvision.transforms.functional as TF
+
+    b0_img1 = img1[0]  # shape [3, H, W]
+    b0_gt_pointmap1 = gt_pointmap1[0]  # shape [3, H, W]
+    b0_gt_depth = gt_depth[0, 0]       # shape [H, W]
+
+    # If your data is normalized, you may want to invert that normalization for visualization
+    # For now, let's assume it's in [-1, 1] or something. We'll just clamp + scale.
+
+    # Convert to a numpy array for plotting
+    b0_img1_np = b0_img1.detach().cpu().numpy().transpose(1, 2, 0)  # [H, W, 3]
+    b0_gt_depth_np = b0_gt_depth.detach().cpu().numpy()
+
+    # Plot them side by side
+    # fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    # axes[0].imshow((b0_img1_np - b0_img1_np.min()) / (b0_img1_np.max() - b0_img1_np.min() + 1e-8))
+    # axes[0].set_title("Thermal Image 1 (first sample)")
+
+    # viz_loader = "data/viz_train_loader"
+    # os.makedirs(viz_loader, exist_ok=True)
+    # save_path = os.path.join(viz_loader, f"sample_train_viz.png")
+
+    # im = axes[1].imshow(b0_gt_depth_np, cmap='plasma')
+    # axes[1].set_title("GT Depth (Z channel) for first sample")
+    # plt.colorbar(im, ax=axes[1])
+    # plt.savefig(save_path, dpi=150)
+    # plt.close()
     
     val_loader = DataLoader(
         val_dataset,

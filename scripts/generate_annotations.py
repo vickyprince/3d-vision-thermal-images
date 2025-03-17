@@ -68,78 +68,77 @@ def main(args):
         for batch_idx, batch in enumerate(tqdm(dataloader, desc="Generating Annotations")):
             if not batch or 'rgb' not in batch:
                 continue
-
+            
             images = batch['rgb']  # [B, 3, H, W]
             paths = batch.get('rgb_path', [])
             thermal_paths = batch.get('thermal_path', [])
             # Make sure we have at least two rgb images and one thermal image
             if len(paths) < 2 or len(thermal_paths) < 1:
                 continue
+            
+            for i in range(len(paths) - 1):
+                img1 = images[i].to(args.device)
+                img2 = images[i+1].to(args.device)
+                base_name1 = os.path.splitext(os.path.basename(paths[i]))[0]
 
-            img1 = images[0].to(args.device)
-            img2 = images[1].to(args.device)
-            base_name1 = os.path.splitext(os.path.basename(paths[0]))[0]
+                # Scale from [0..255] to [0..1] if needed
+                if img1.max() > 1.0:
+                    img1 = img1 / 255.0
+                if img2.max() > 1.0:
+                    img2 = img2 / 255.0
 
-            # If your images are in [0..255], scale them to [0..1]
-            if img1.max() > 1.0:
-                img1 = img1 / 255.0
-            if img2.max() > 1.0:
-                img2 = img2 / 255.0
+                dummy_instance = torch.zeros((1, 1, img1.shape[-2], img1.shape[-1]), device=args.device)
+                image_pair = [(
+                    {"img": img1.unsqueeze(0), "instance": dummy_instance},
+                    {"img": img2.unsqueeze(0), "instance": dummy_instance}
+                )]
 
-            # Build pair for MASt3r inference
-            dummy_instance = torch.zeros((1,1,img1.shape[-2],img1.shape[-1]), device=args.device)
-            image_pair = [(
-                {"img": img1.unsqueeze(0), "instance": dummy_instance},
-                {"img": img2.unsqueeze(0), "instance": dummy_instance}
-            )]
+                out = inference(image_pair, model, args.device, batch_size=1, verbose=False)
+                if 'pred1' not in out or 'pred2' not in out:
+                    continue
 
-            out = inference(image_pair, model, args.device, batch_size=1, verbose=False)
-            if 'pred1' not in out or 'pred2' not in out:
-                continue
+                pm1_dict = out['pred1']
+                pm2_dict = out['pred2']
 
-            pm1_dict = out['pred1']
-            pm2_dict = out['pred2']
+                pm1 = get_pointmap(pm1_dict)  # shape [1, 3, H, W]
+                pm2 = get_pointmap(pm2_dict)  # shape [1, 3, H, W]
 
-            pm1 = get_pointmap(pm1_dict)  # shape [1, 3, H, W]
-            pm2 = get_pointmap(pm2_dict)  # shape [1, 3, H, W]
+                pm1_np = pm1[0].cpu().numpy()  # [3, H, W]
+                pm2_np = pm2[0].cpu().numpy()  # [3, H, W]
 
-            # Convert to numpy
-            pm1_np = pm1[0].cpu().numpy()  # [3, H, W]
-            pm2_np = pm2[0].cpu().numpy()  # [3, H, W]
+                depth_value_1 = pm1_np[..., 2]
 
-            depth_value_1 = pm1_np[..., 2]
+                relative_pose_1_to_2 = compute_relative_pose_from_pointmaps(pm1_np, pm2_np)
+                pose1 = np.eye(4)  # canonical
 
-            # Relative pose: assume first image is identity, compute second from pointmaps
-            relative_pose_1_to_2 = compute_relative_pose_from_pointmaps(pm1_np, pm2_np)
-            pose1 = np.eye(4)  # canonical
+                intrinsics = get_intrinsics_from_yaml(calib, paths[i])  # Use the current pair's path
+                fx, fy, cx, cy = intrinsics
+                intrinsics = np.array([
+                    [fx, 0,  cx],
+                    [0,  fy, cy],
+                    [0,  0,   1 ]
+                ])
 
-            # Intrinsics from calibration
-            intrinsics = get_intrinsics_from_yaml(calib, paths[0])
-            fx, fy, cx, cy = intrinsics
-            intrinsics = np.array([
-                [fx, 0,  cx],
-                [0,  fy, cy],
-                [0,  0,   1 ]
-            ])
+                annotation = {
+                    'pose1': pose1,
+                    'pose2': relative_pose_1_to_2,
+                    'depth_value_1': depth_value_1.astype(np.float16),
+                    'intrinsics': intrinsics.astype(np.float16),
+                    'pointmap1': pm1_np.astype(np.float16),
+                    'pointmap2': pm2_np.astype(np.float16),
+                    'frame1_path': paths[i]
+                }
+                ann_out_path = os.path.join(args.output_path, f"{base_name1}.npy")
+                if os.path.exists(ann_out_path):
+                    print(f"Skipping existing annotation: {ann_out_path}")
+                    continue
+                # np.save(ann_out_path, annotation)
+                np.savez_compressed(ann_out_path, **annotation)
 
-            # Build and save annotation
-            annotation = {
-                'pose1': pose1,                        # identity
-                'pose2': relative_pose_1_to_2,         # from pointmaps
-                'depth_value_1': depth_value_1,        # Z of first pointmap
-                'intrinsics': intrinsics,
-                'pointmap1': pm1_np,                   # optional
-                'pointmap2': pm2_np,                   # optional
-                'frame1_path': paths[0]                # for visualization title
-            }
-            ann_out_path = os.path.join(args.output_path, f"{base_name1}.npy")
-            np.save(ann_out_path, annotation)
-
-            # Visualize annotation and save visualization image (do not show interactively)
-            if batch_idx % 100 == 0:
-                viz_path = os.path.join(viz_dir, f"{base_name1}_viz.png")
-                visualize_annotation_correctness(annotation, paths[0], thermal_paths[0], save_path=viz_path)
-                print(f"Saved visualization: {viz_path}")
+                if batch_idx % 1000 == 0:
+                    viz_path = os.path.join(viz_dir, f"{base_name1}_viz.png")
+                    visualize_annotation_correctness(annotation, paths[i], thermal_paths[i], save_path=viz_path)
+                    print(f"Saved visualization: {viz_path}")
 
 if __name__ == "__main__":
     args = parse_args()

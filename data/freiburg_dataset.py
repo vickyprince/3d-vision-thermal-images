@@ -41,40 +41,42 @@ class FreiburgThermalDataset(Dataset):
             seq_path = os.path.join(self.root_dir, seq)
             if not os.path.isdir(seq_path):
                 continue
-
+            
             drive_folders = sorted(
                 d for d in os.listdir(seq_path)
                 if os.path.isdir(os.path.join(seq_path, d))
             )
-
+            
             for drive in drive_folders:
                 drive_path = os.path.join(seq_path, drive)
-
-                # Look directly in the subfolders fl_ir_aligned & fl_rgb
                 ir_dir = os.path.join(drive_path, 'fl_ir_aligned')
                 rgb_dir = os.path.join(drive_path, 'fl_rgb')
-
+                
                 if not os.path.isdir(ir_dir) or not os.path.isdir(rgb_dir):
-                    print(f"Warning: {drive_path} missing 'fl_ir_aligned' or 'fl_rgb'")
                     continue
-
-                ir_files  = sorted(glob.glob(os.path.join(ir_dir, '*.png')))
-                rgb_files = sorted(glob.glob(os.path.join(rgb_dir, '*.png')))
-
-                if len(ir_files) == 0 or len(rgb_files) == 0:
-                    print(f"Drive {drive_path} has {len(rgb_files)} RGB and {len(ir_files)} IR files")
-                    continue
-
-                # Pair them by sorted index (assuming 1-to-1 matching)
-                num_pairs = min(len(ir_files), len(rgb_files))
-                for i in range(num_pairs):
-                    self.samples.append({
-                        'thermal_path':  ir_files[i],  # Renaming IR to thermal
-                        'rgb_path':      rgb_files[i],
-                        'seq_name':      seq,
-                        'drive':         drive
-                    })
-
+                
+                # Build a dict from the IR filenames (unique_part -> full_path)
+                ir_dict = {}
+                for f in glob.glob(os.path.join(ir_dir, '*.png')):
+                    base = os.path.basename(f)  # e.g. "fl_ir_aligned_1570722156_952177040.png"
+                    # remove the prefix "fl_ir_aligned_" so we get "1570722156_952177040.png"
+                    unique_part = base.replace('fl_ir_aligned_', '')
+                    ir_dict[unique_part] = f
+                
+                # For each RGB file, find a matching IR file by substring
+                for f in glob.glob(os.path.join(rgb_dir, '*.png')):
+                    base = os.path.basename(f)  # e.g. "fl_rgb_1570722156_952177040.png"
+                    # remove prefix "fl_rgb_" so we get "1570722156_952177040.png"
+                    unique_part = base.replace('fl_rgb_', '')
+                    
+                    if unique_part in ir_dict:
+                        self.samples.append({
+                            'thermal_path': ir_dict[unique_part],
+                            'rgb_path': f,
+                            'seq_name': seq,
+                            'drive': drive
+                        })
+        
         print(f"FreiburgThermalDataset: Found {len(self.samples)} IR/RGB pairs in {self.root_dir}")
 
     def __len__(self):
