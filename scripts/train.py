@@ -122,7 +122,8 @@ def main(args):
     # Create lr scheduler
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        T_max=config['training']['epochs']
+        T_max=config['training']['epochs'],
+        eta_min=1e-6
     )
     
     # Resume if specified

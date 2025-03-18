@@ -11,7 +11,7 @@ device : "cuda"
 
 # Training configuration
 training:
-  batch_size: 8
+  batch_size: 2
   epochs: 2
   lr: 1.0e-4
   weight_decay: 1.0e-5
@@ -20,7 +20,7 @@ training:
 
 # Evaluation configuration
 evaluation:
-  batch_size: 8
+  batch_size: 2
   vis_samples: 10
 
 # AIS test data configuration

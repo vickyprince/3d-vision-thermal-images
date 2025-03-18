@@ -10,6 +10,7 @@ from pathlib import Path
 import glob
 import numpy as np
 import torch
+torch.cuda.empty_cache()
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Thermal 3D Vision Project')
