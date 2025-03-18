@@ -54,7 +54,7 @@ class FreiburgTrainThermalDataset(Dataset):
             return
 
         # Find all annotation files
-        annotation_files = sorted(glob.glob(os.path.join(self.annotations_path, "*.npy")))
+        annotation_files = sorted(glob.glob(os.path.join(self.annotations_path, "*.np*")))
         
         # Wrap with tqdm if progress display is enabled
         if self.show_progress:
@@ -76,7 +76,9 @@ class FreiburgTrainThermalDataset(Dataset):
                 
                 # Get the RGB frame path from annotation
                 rgb_frame_path = annotation['frame1_path']
-                
+                if isinstance(rgb_frame_path, np.ndarray):
+                    rgb_frame_path = rgb_frame_path.item() if rgb_frame_path.size == 1 else str(rgb_frame_path)
+
                 # Convert RGB path to thermal path by replacing 'fl_rgb' with 'fl_ir_aligned'
                 thermal_path1 = rgb_frame_path.replace('fl_rgb', 'fl_ir_aligned')
                 
