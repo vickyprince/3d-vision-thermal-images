@@ -64,7 +64,11 @@ class FreiburgTrainThermalDataset(Dataset):
         for ann_path in annotation_files:
             try:
                 # Load annotation to get frame paths
-                annotation = np.load(ann_path, allow_pickle=True).item()
+                raw = np.load(ann_path, allow_pickle=True)
+                if isinstance(raw, np.lib.npyio.NpzFile):
+                    annotation = {k: raw[k] for k in raw}
+                else:
+                    annotation = raw.item()
                 
                 if 'frame1_path' not in annotation:
                     print(f"Warning: annotation {ann_path} missing frame1_path")
@@ -122,7 +126,11 @@ class FreiburgTrainThermalDataset(Dataset):
             annotation_path = sample['annotation_path']
 
             # Load annotation
-            annotation = np.load(annotation_path, allow_pickle=True).item()
+            raw = np.load(annotation_path, allow_pickle=True)
+            if isinstance(raw, np.lib.npyio.NpzFile):
+                annotation = {k: raw[k] for k in raw}
+            else:
+                annotation = raw.item()
             
             # Load thermal images
             thermal_img1 = self._load_thermal_image(thermal_path1)
@@ -148,7 +156,7 @@ class FreiburgTrainThermalDataset(Dataset):
                 if gt_pointmap1.shape[1] != h or gt_pointmap1.shape[2] != w:
                     resized_pointmap1 = torch.zeros((3, h, w), dtype=torch.float32)
                     resized_pointmap2 = torch.zeros((3, h, w), dtype=torch.float32)
-                    
+
                     for c in range(3):
                         channel1 = gt_pointmap1[c].numpy()
                         channel2 = gt_pointmap2[c].numpy()

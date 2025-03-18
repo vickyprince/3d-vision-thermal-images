@@ -11,9 +11,9 @@ device : "cuda"
 
 # Training configuration
 training:
-  batch_size: 2
-  epochs: 20
-  lr: 1.0e-4
+  batch_size: 4
+  epochs: 10
+  lr: 1.0e-5
   weight_decay: 1.0e-5
   print_freq: 10
   save_freq: 5

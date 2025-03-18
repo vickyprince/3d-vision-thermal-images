@@ -99,36 +99,6 @@ def main(args):
     print("gt_pointmap1 shape:", gt_pointmap1.shape)
     print("gt_pointmap2 shape:", gt_pointmap2.shape)
     print("gt_depth shape:", gt_depth.shape)
-
-    # Optionally visualize the first sample in this batch
-    import matplotlib.pyplot as plt
-    import torchvision.transforms.functional as TF
-
-    b0_img1 = img1[0]  # shape [3, H, W]
-    b0_gt_pointmap1 = gt_pointmap1[0]  # shape [3, H, W]
-    b0_gt_depth = gt_depth[0, 0]       # shape [H, W]
-
-    # If your data is normalized, you may want to invert that normalization for visualization
-    # For now, let's assume it's in [-1, 1] or something. We'll just clamp + scale.
-
-    # Convert to a numpy array for plotting
-    b0_img1_np = b0_img1.detach().cpu().numpy().transpose(1, 2, 0)  # [H, W, 3]
-    b0_gt_depth_np = b0_gt_depth.detach().cpu().numpy()
-
-    # Plot them side by side
-    # fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    # axes[0].imshow((b0_img1_np - b0_img1_np.min()) / (b0_img1_np.max() - b0_img1_np.min() + 1e-8))
-    # axes[0].set_title("Thermal Image 1 (first sample)")
-
-    # viz_loader = "data/viz_train_loader"
-    # os.makedirs(viz_loader, exist_ok=True)
-    # save_path = os.path.join(viz_loader, f"sample_train_viz.png")
-
-    # im = axes[1].imshow(b0_gt_depth_np, cmap='plasma')
-    # axes[1].set_title("GT Depth (Z channel) for first sample")
-    # plt.colorbar(im, ax=axes[1])
-    # plt.savefig(save_path, dpi=150)
-    # plt.close()
     
     val_loader = DataLoader(
         val_dataset,
@@ -156,7 +126,8 @@ def main(args):
     # Create lr scheduler
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer,
-        T_max=config['training']['epochs']
+        T_max=config['training']['epochs'],
+        eta_min=1e-6
     )
     
     # Resume if specified
@@ -234,8 +205,6 @@ def train_one_epoch(model, train_loader, optimizer, device, epoch, writer, confi
         # Compute loss
         loss_pointmap1 = pointmap_criterion(pred_pointmap1, gt_pointmap1)
         loss_pointmap2 = pointmap_criterion(pred_pointmap2, gt_pointmap2)
-        
-        # Total loss
         loss = loss_pointmap1 + loss_pointmap2
         
         # Backward pass
@@ -280,7 +249,6 @@ def validate(model, val_loader, device, epoch, writer):
         'acc_1.25^3': 0.0
     }
     
-    # For image logging during validation, we take the first batch
     val_images_logged = False
     
     with torch.no_grad():
@@ -297,14 +265,12 @@ def validate(model, val_loader, device, epoch, writer):
             for k, v in metrics.items():
                 running_metrics[k] += v
             
-            # Log images for the first batch of validation
             if not val_images_logged:
                 writer.add_image('val/img1', make_grid(img1, normalize=True, scale_each=True), epoch)
                 writer.add_image('val/gt_depth', make_grid(gt_depth, normalize=True, scale_each=True), epoch)
                 writer.add_image('val/pred_depth', make_grid(pred_depth, normalize=True, scale_each=True), epoch)
                 val_images_logged = True
     
-    # Average metrics over validation batches
     for k in running_metrics:
         running_metrics[k] /= len(val_loader)
         writer.add_scalar(f'val/{k}', running_metrics[k], epoch)
