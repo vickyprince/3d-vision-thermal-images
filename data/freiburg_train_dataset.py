@@ -53,7 +53,7 @@ class FreiburgTrainThermalDataset(Dataset):
                 print(f"Loaded {len(self.samples)} samples from cache.")
             return
 
-        # Find all annotation files
+        # Find all annotation files (match both npy and npz)
         annotation_files = sorted(glob.glob(os.path.join(self.annotations_path, "*.np*")))
         
         # Wrap with tqdm if progress display is enabled
@@ -74,11 +74,15 @@ class FreiburgTrainThermalDataset(Dataset):
                     print(f"Warning: annotation {ann_path} missing frame1_path")
                     continue
                 
-                # Get the RGB frame path from annotation
+                # Get the RGB frame path from annotation and convert to a native string if needed.
                 rgb_frame_path = annotation['frame1_path']
                 if isinstance(rgb_frame_path, np.ndarray):
-                    rgb_frame_path = rgb_frame_path.item() if rgb_frame_path.size == 1 else str(rgb_frame_path)
-
+                    if rgb_frame_path.size == 1:
+                        rgb_frame_path = rgb_frame_path.item()
+                    else:
+                        print(f"Warning: frame1_path in {ann_path} is not a scalar; skipping this annotation")
+                        continue
+                
                 # Convert RGB path to thermal path by replacing 'fl_rgb' with 'fl_ir_aligned'
                 thermal_path1 = rgb_frame_path.replace('fl_rgb', 'fl_ir_aligned')
                 
@@ -90,7 +94,6 @@ class FreiburgTrainThermalDataset(Dataset):
                     current_index = thermal_files.index(thermal_path1)
                     if current_index + 1 < len(thermal_files):
                         thermal_path2 = thermal_files[current_index + 1]
-                        
                         # Verify both files exist
                         if os.path.exists(thermal_path1) and os.path.exists(thermal_path2):
                             self.samples.append({
@@ -133,7 +136,11 @@ class FreiburgTrainThermalDataset(Dataset):
                 annotation = {k: raw[k] for k in raw}
             else:
                 annotation = raw.item()
-            
+
+            # If 'frame1_path' is present and stored as a numpy array, convert to native string.
+            if 'frame1_path' in annotation and isinstance(annotation['frame1_path'], np.ndarray):
+                annotation['frame1_path'] = annotation['frame1_path'].item()
+
             # Load thermal images
             thermal_img1 = self._load_thermal_image(thermal_path1)
             thermal_img2 = self._load_thermal_image(thermal_path2)
@@ -169,7 +176,17 @@ class FreiburgTrainThermalDataset(Dataset):
                     
                     gt_pointmap1 = resized_pointmap1
                     gt_pointmap2 = resized_pointmap2
-                    depth_value_1 = cv2.resize(depth_value_1, (w, h), interpolation=cv2.INTER_LINEAR)
+
+                    # Guard for depth_value_1 before resizing
+                    if depth_value_1.size == 0 or depth_value_1.shape[0] == 0 or depth_value_1.shape[1] == 0:
+                        print(f"Warning: Empty depth map in annotation {annotation_path}, substituting zeros.")
+                        depth_value_1 = np.zeros((h, w), dtype=np.float32)
+                    else:
+                        try:
+                            depth_value_1 = cv2.resize(depth_value_1, (w, h), interpolation=cv2.INTER_LINEAR)
+                        except cv2.error as e:
+                            print(f"Warning: cv2.resize failed for depth map in annotation {annotation_path}: {e}")
+                            depth_value_1 = np.zeros((h, w), dtype=np.float32)
             
             # Apply transform to thermal images if provided
             if self.transform:
