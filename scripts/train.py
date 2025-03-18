@@ -10,6 +10,7 @@ import yaml
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
+from utils.helpers import custom_collate
 
 # Disable the symmetrization check to avoid ambiguous tensor comparisons.
 from dust3r.utils import misc
@@ -84,7 +85,8 @@ def main(args):
         train_dataset, 
         batch_size=config['training']['batch_size'],
         shuffle=True,
-        num_workers=config['data']['num_workers']
+        num_workers=config['data']['num_workers'],
+        collate_fn=custom_collate
     )
 
     batch = next(iter(train_loader))

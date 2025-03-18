@@ -65,4 +65,6 @@ def compute_relative_pose_from_pointmaps(pointmap1, pointmap2):
 
 def custom_collate(batch):
     batch = [item for item in batch if item is not None]
+    if len(batch) == 0:
+        return None
     return default_collate(batch)

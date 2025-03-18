@@ -177,12 +177,17 @@ class FreiburgTrainThermalDataset(Dataset):
                     gt_pointmap1 = resized_pointmap1
                     gt_pointmap2 = resized_pointmap2
 
-                    # Guard for depth_value_1 before resizing
-                    if depth_value_1.size == 0 or depth_value_1.shape[0] == 0 or depth_value_1.shape[1] == 0:
-                        print(f"Warning: Empty depth map in annotation {annotation_path}, substituting zeros.")
+                    # Handle depth_value_1 resizing more robustly
+                    if depth_value_1 is None or not isinstance(depth_value_1, np.ndarray):
+                        print(f"Warning: Invalid depth map in annotation {annotation_path}, using zeros.")
+                        depth_value_1 = np.zeros((h, w), dtype=np.float32)
+                    elif depth_value_1.size == 0 or depth_value_1.ndim != 2:
+                        print(f"Warning: Empty or invalid shape depth map in annotation {annotation_path}, using zeros.")
                         depth_value_1 = np.zeros((h, w), dtype=np.float32)
                     else:
                         try:
+                            # Make sure depth_value_1 is properly formatted for resizing
+                            depth_value_1 = depth_value_1.astype(np.float32)
                             depth_value_1 = cv2.resize(depth_value_1, (w, h), interpolation=cv2.INTER_LINEAR)
                         except cv2.error as e:
                             print(f"Warning: cv2.resize failed for depth map in annotation {annotation_path}: {e}")
@@ -207,17 +212,29 @@ class FreiburgTrainThermalDataset(Dataset):
             }
         except Exception as e:
             print(f"Error loading sample {idx}: {e}")
-            raise e
+            return None
     
     def _load_thermal_image(self, path):
         """
         Load thermal image and convert to 3-channel tensor.
         """
-        thermal_img = cv2.imread(path, cv2.IMREAD_ANYDEPTH)
-        if thermal_img is None:
-            raise RuntimeError(f"Failed to load thermal image: {path}")
-        thermal_img = thermal_img.astype(np.float32)
-        thermal_img /= 65535.0  # Normalize assuming 16-bit image.
+        # Check if file exists before trying to read it
+        if not os.path.exists(path):
+            print(f"Error: Thermal image file not found: {path}")
+            # Create a placeholder image instead of failing
+            height, width = self.img_size if self.img_size else (224, 224)
+            thermal_img = np.zeros((height, width), dtype=np.float32)
+        else:
+            thermal_img = cv2.imread(path, cv2.IMREAD_ANYDEPTH)
+            if thermal_img is None:
+                print(f"Error: Failed to read thermal image: {path}")
+                # Create a placeholder image
+                height, width = self.img_size if self.img_size else (224, 224)
+                thermal_img = np.zeros((height, width), dtype=np.float32)
+            else:
+                thermal_img = thermal_img.astype(np.float32)
+                thermal_img /= 65535.0  # Normalize assuming 16-bit image
+        
         thermal_img_3ch = np.stack([thermal_img, thermal_img, thermal_img], axis=-1)
         if self.img_size is not None:
             thermal_img_3ch = cv2.resize(thermal_img_3ch, self.img_size)
