@@ -2,6 +2,7 @@ import sys
 import os
 sys.path.append('/home/user/victorv1/Cuda/3d-vision-thermal-images/mast3r/dust3r/croco')
 sys.path.append(os.path.join(os.path.dirname(__file__), 'mast3r'))
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 # main.py
 import argparse
 import os
@@ -18,7 +19,7 @@ def parse_args():
     parser.add_argument('--mode', type=str, required=True, choices=['generate_annotations', 'visualise', 'train', 'evaluate', 'evaluate_ais'], 
                        help='Mode to run')
     parser.add_argument('--checkpoint', type=str, default=None, help='Path to checkpoint for evaluation or resuming training')
-    parser.add_argument('--output_dir', type=str, default='results', help='Directory to save results')
+    parser.add_argument('--output_dir', type=str, default='/home/nfs/inf6/data/cudalab/victorv1/results', help='Directory to save results')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (cuda or cpu)')
     return parser.parse_args()
 
@@ -57,7 +58,8 @@ def main(args):
         train_args = argparse.Namespace(
             config=args.config,
             checkpoint_dir=os.path.join(args.output_dir, 'checkpoints'),
-            resume=args.checkpoint
+            resume=args.checkpoint,
+            debug=True
         )
         train_main(train_args)
         
