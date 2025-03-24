@@ -51,7 +51,7 @@ def main(args):
         for batch_idx, batch in enumerate(tqdm(dataloader, desc="Generating Annotations")):
             if not batch or 'rgb' not in batch:
                 continue
-
+            
             images = batch['rgb']  # [B, 3, H, W]
             paths = batch.get('rgb_path', [])
             thermal_paths = batch.get('thermal_path', [])

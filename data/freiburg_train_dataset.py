@@ -55,8 +55,8 @@ class FreiburgTrainThermalDataset(Dataset):
                 print(f"Loaded {len(self.samples)} samples from cache.")
             return
 
-        # Find all annotation files
-        annotation_files = sorted(glob.glob(os.path.join(self.annotations_path, "*.npy")))
+        # Find all annotation files (match both npy and npz)
+        annotation_files = sorted(glob.glob(os.path.join(self.annotations_path, "*.np*")))
         
         if self.show_progress:
             from tqdm import tqdm
@@ -153,7 +153,22 @@ class FreiburgTrainThermalDataset(Dataset):
                         resized_pointmap2[c] = torch.from_numpy(resized_channel2)
                     gt_pointmap1 = resized_pointmap1
                     gt_pointmap2 = resized_pointmap2
-                    depth_value_1 = cv2.resize(depth_value_1, (w, h), interpolation=cv2.INTER_LINEAR)
+
+                    # Handle depth_value_1 resizing more robustly
+                    if depth_value_1 is None or not isinstance(depth_value_1, np.ndarray):
+                        print(f"Warning: Invalid depth map in annotation {annotation_path}, using zeros.")
+                        depth_value_1 = np.zeros((h, w), dtype=np.float32)
+                    elif depth_value_1.size == 0 or depth_value_1.ndim != 2:
+                        print(f"Warning: Empty or invalid shape depth map in annotation {annotation_path}, using zeros.")
+                        depth_value_1 = np.zeros((h, w), dtype=np.float32)
+                    else:
+                        try:
+                            # Make sure depth_value_1 is properly formatted for resizing
+                            depth_value_1 = depth_value_1.astype(np.float32)
+                            depth_value_1 = cv2.resize(depth_value_1, (w, h), interpolation=cv2.INTER_LINEAR)
+                        except cv2.error as e:
+                            print(f"Warning: cv2.resize failed for depth map in annotation {annotation_path}: {e}")
+                            depth_value_1 = np.zeros((h, w), dtype=np.float32)
             
             return {
                 'img1': thermal_img1,  # Tensor: [3, H, W]
@@ -169,7 +184,7 @@ class FreiburgTrainThermalDataset(Dataset):
             }
         except Exception as e:
             print(f"Error loading sample {idx}: {e}")
-            raise e
+            return None
     
     def _load_thermal_image(self, path):
         """

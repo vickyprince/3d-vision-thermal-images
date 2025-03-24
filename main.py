@@ -54,7 +54,7 @@ def main(args):
             data_path=config['data']['train_path'],
             output_path="data/annotations",
             calib_yaml="config/calibrations/thermal_stereo_calib.yaml",
-            batch_size=8,
+            batch_size=2,
             num_workers=4,
             device=device
         )
