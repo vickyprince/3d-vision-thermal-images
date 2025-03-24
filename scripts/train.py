@@ -308,8 +308,8 @@ def main(args):
         betas=(0.9, 0.999)
     )
     
-    lr_init = config['training']['lr_init']
-    lr_min  = config['training']['lr_min']
+    lr_init = float(config['training']['lr_init'])
+    lr_min  = float(config['training']['lr_min'])
     total_epochs = config['training']['epochs']
     warmup_epochs = config['training']['warmup_epochs']
 
@@ -364,29 +364,9 @@ def main(args):
         scheduler.step()
         current_lr = optimizer.param_groups[0]['lr']
         writer.add_scalar('train/learning_rate', current_lr, epoch)
-        
-        ckpt_path = os.path.join(args.checkpoint_dir, f'checkpoint_epoch_{epoch}.pth')
-        torch.save({
-            'epoch': epoch,
-            'model': model.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'scheduler': scheduler.state_dict(),
-            'scaler': scaler.state_dict(),
-            'config': config,
-            'val_metrics': val_metrics
-        }, ckpt_path)
-        torch.save({
-            'epoch': epoch,
-            'model': model.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'scheduler': scheduler.state_dict(),
-            'scaler': scaler.state_dict(),
-            'config': config,
-            'val_metrics': val_metrics
-        }, os.path.join(args.checkpoint_dir, 'latest.pth'))
-        
-        if val_metrics['rmse'] < best_val_metrics:
-            best_val_metrics = val_metrics['rmse']
+
+        if (epoch + 1) % config['training']['save_freq'] == 0:
+            ckpt_path = os.path.join(args.checkpoint_dir, f'checkpoint_epoch_{epoch}.pth')
             torch.save({
                 'epoch': epoch,
                 'model': model.state_dict(),
@@ -395,10 +375,31 @@ def main(args):
                 'scaler': scaler.state_dict(),
                 'config': config,
                 'val_metrics': val_metrics
-            }, os.path.join(args.checkpoint_dir, 'best.pth'))
-            print(f"Saved new best model with RMSE: {best_val_metrics:.4f}")
+            }, ckpt_path)
+            torch.save({
+                'epoch': epoch,
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'scheduler': scheduler.state_dict(),
+                'scaler': scaler.state_dict(),
+                'config': config,
+                'val_metrics': val_metrics
+            }, os.path.join(args.checkpoint_dir, 'latest.pth'))
+            
+            if val_metrics['rmse'] < best_val_metrics:
+                best_val_metrics = val_metrics['rmse']
+                torch.save({
+                    'epoch': epoch,
+                    'model': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                    'scaler': scaler.state_dict(),
+                    'config': config,
+                    'val_metrics': val_metrics
+                }, os.path.join(args.checkpoint_dir, 'best.pth'))
+                print(f"Saved new best model with RMSE: {best_val_metrics:.4f}")
 
-def train_one_epoch(model, train_loader, optimizer, criterion, device, epoch, writer, config, scaler):
+def train_one_epoch(model, train_loader, optimizer, criterion, device, epoch, writer, config, scaler, accum_steps=4):
     model.train()
     running_loss = 0.0
     running_loss_components = {
@@ -406,9 +407,10 @@ def train_one_epoch(model, train_loader, optimizer, criterion, device, epoch, wr
         'depth_loss': 0.0,
         'consistency_loss': 0.0
     }
-    
+
     grad_clip_value = config['training'].get('grad_clip', 1.0)
     
+    optimizer.zero_grad()  # Zero gradients before starting accumulation
     for i, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch}")):
         img1 = batch['img1'].to(device)
         img2 = batch['img2'].to(device)
@@ -417,13 +419,11 @@ def train_one_epoch(model, train_loader, optimizer, criterion, device, epoch, wr
         pose1 = batch['pose1'].to(device) if 'pose1' in batch else None
         pose2 = batch['pose2'].to(device) if 'pose2' in batch else None
         
-        optimizer.zero_grad()
-        
         with torch.amp.autocast(device_type='cuda'):
             outputs = model(img1, img2)
             pred_pointmap1 = outputs['pointmap1']
             pred_pointmap2 = outputs['pointmap2']
-            
+
             if pred_pointmap1.shape[2:] != gt_pointmap1.shape[2:]:
                 pred_pointmap1 = F.interpolate(pred_pointmap1, size=gt_pointmap1.shape[2:], mode='bilinear', align_corners=False)
                 pred_pointmap2 = F.interpolate(pred_pointmap2, size=gt_pointmap2.shape[2:], mode='bilinear', align_corners=False)
@@ -432,22 +432,21 @@ def train_one_epoch(model, train_loader, optimizer, criterion, device, epoch, wr
                 pred_pointmap1, pred_pointmap2, gt_pointmap1, gt_pointmap2, 
                 img1, img2, pose1, pose2
             )
+            loss = loss / accum_steps  # Normalize loss by accumulation steps
         
         scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_value)
-        scaler.step(optimizer)
-        scaler.update()
         
-        running_loss += loss.item()
+        # Accumulate gradients: update only every accum_steps mini-batches
+        if (i + 1) % accum_steps == 0 or (i + 1) == len(train_loader):
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_value)
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()  # Reset gradients for next accumulation
+        
+        running_loss += loss.item() * accum_steps  # Multiply back the loss for reporting
         global_step = epoch * len(train_loader) + i
-        writer.add_scalar('train/loss', loss.item(), global_step)
-        
-        # Accumulate sub-losses for epoch-level logging
-        running_loss_components['pointmap_l1'] += loss_details['pointmap_l1']
-        running_loss_components['depth_loss'] += loss_details['depth_loss']
-        running_loss_components['consistency_loss'] += loss_details['consistency_loss']
-        
+        writer.add_scalar('train/loss', loss.item() * accum_steps, global_step)
         for k, v in loss_details.items():
             writer.add_scalar(f'train/{k}', v, global_step)
         writer.add_scalar('train/lr', optimizer.param_groups[0]['lr'], global_step)
@@ -457,7 +456,6 @@ def train_one_epoch(model, train_loader, optimizer, criterion, device, epoch, wr
             writer.add_image('train/img1', img_grid, global_step)
             pred_depth = pred_pointmap1[:4, 2:3]
             gt_depth = gt_pointmap1[:4, 2:3]
-            # Normalized depth for logging
             pred_depth_norm = (pred_depth - pred_depth.min()) / (pred_depth.max() - pred_depth.min() + 1e-8)
             gt_depth_norm = (gt_depth - gt_depth.min()) / (gt_depth.max() - gt_depth.min() + 1e-8)
             writer.add_image('train/pred_depth', make_grid(pred_depth_norm, normalize=False), global_step)
@@ -467,7 +465,7 @@ def train_one_epoch(model, train_loader, optimizer, criterion, device, epoch, wr
             writer.add_image('train/depth_error', make_grid(error_map, normalize=False), global_step)
         
         if i % config['training']['print_freq'] == 0:
-            print(f"Epoch {epoch}, Iter {i}/{len(train_loader)}, Loss: {loss.item():.4f}")
+            print(f"Epoch {epoch}, Iter {i}/{len(train_loader)}, Loss: {loss.item() * accum_steps:.4f}")
     
     avg_loss = running_loss / len(train_loader)
     writer.add_scalar('train/epoch_loss', avg_loss, epoch)

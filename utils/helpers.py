@@ -1,5 +1,7 @@
 from torch.utils.data.dataloader import default_collate
 import numpy as np
+import yaml
+import os
 
 def get_pointmap(pred):
     for key in ["pts3d", "pointmap", "pointmaps", "predicted_pts3d", "pts3d_in_other_view"]:
@@ -66,3 +68,21 @@ def compute_relative_pose_from_pointmaps(pointmap1, pointmap2):
 def custom_collate(batch):
     batch = [item for item in batch if item is not None]
     return default_collate(batch)
+
+
+def get_intrinsics_from_yaml(calib, image_path):
+    """
+    if the filename contains 'fl_rgb', use 'left' intrinsics,
+    otherwise 'right'
+    """
+    base = os.path.basename(image_path).lower()
+    if "fl_rgb" in base:
+        intrinsics = np.array(calib["left"]["intrinsics"])
+    else:
+        intrinsics = np.array(calib["right"]["intrinsics"])
+    return intrinsics
+
+def load_calibrations(calib_yaml):
+    with open(calib_yaml, "r") as f:
+        calib = yaml.safe_load(f)
+    return calib

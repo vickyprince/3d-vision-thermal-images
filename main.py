@@ -16,9 +16,17 @@ torch.cuda.empty_cache()
 def parse_args():
     parser = argparse.ArgumentParser(description='Thermal 3D Vision Project')
     parser.add_argument('--config', type=str, default='config/model_config.yaml', help='Path to config file')
-    parser.add_argument('--mode', type=str, required=True, choices=['generate_annotations', 'visualise', 'train', 'evaluate', 'evaluate_ais'], 
-                       help='Mode to run')
+    parser.add_argument('--mode', type=str, required=True,
+                        choices=['generate_annotations', 'visualise', 'verify_annotations', 'train', 'evaluate', 'evaluate_ais', 'evaluate_combined'],
+                        help='Mode to run')
     parser.add_argument('--checkpoint', type=str, default=None, help='Path to checkpoint for evaluation or resuming training')
+    # New arguments for combined evaluation:
+    parser.add_argument('--ft_checkpoint', type=str, default='/home/nfs/inf6/data/cudalab/victorv1/results/checkpoints/checkpoint_epoch_139.pth',
+                        help='Path to fine-tuned DUSt3R checkpoint (for evaluate_combined)')
+    parser.add_argument('--base_checkpoint', type=str, default='checkpoints/DUSt3R_ViTLarge_BaseDecoder_224_linear.pth',
+                        help='Path to base DUSt3R checkpoint (for evaluate_combined)')
+    parser.add_argument('--ma_checkpoint', type=str, default='checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth',
+                        help='Path to MASt3R checkpoint (for evaluate_combined)')
     parser.add_argument('--output_dir', type=str, default='/home/nfs/inf6/data/cudalab/victorv1/results', help='Directory to save results')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use (cuda or cpu)')
     return parser.parse_args()
@@ -51,6 +59,22 @@ def main(args):
             device=device
         )
         generate_annotations_main(generate_args)
+    
+    elif args.mode == 'verify_annotations':
+        # verify annotations
+        from scripts.verify_annotations import main as verify_annotations
+        device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+        verify_annotations_args = argparse.Namespace(
+            data_path=config['data']['train_path'],
+            ma_model_path="/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth",
+            output_dir=config['data']['verify_annotations_path'],
+            device=device,
+            img_size=[224,224],
+            num_workers=4
+        )
+        if verify_annotations_args.output_dir is not None:
+            os.makedirs(verify_annotations_args.output_dir, exist_ok=True)
+        verify_annotations(verify_annotations_args)
         
     elif args.mode == 'train':
         # Train the model
@@ -68,9 +92,12 @@ def main(args):
         from scripts.evaluate import main as evaluate_main
         evaluate_args = argparse.Namespace(
             config=args.config,
-            checkpoint=args.checkpoint,
-            output_dir=os.path.join(args.output_dir, 'freiburg_evaluation'),
-            vis_samples=10
+            ft_checkpoint=args.ft_checkpoint,
+            base_checkpoint=args.base_checkpoint,
+            calib_yaml="config/calibrations/thermal_stereo_calib.yaml",
+            ma_checkpoint=args.ma_checkpoint,
+            output_dir=os.path.join(args.output_dir, 'eval_results'),
+            vis_samples=50
         )
         evaluate_main(evaluate_args)
         

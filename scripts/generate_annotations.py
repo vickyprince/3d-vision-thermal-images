@@ -8,7 +8,7 @@ import yaml
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from utils.visualization import visualize_annotation_correctness
-from utils.helpers import get_pointmap, compute_relative_pose_from_pointmaps, custom_collate
+from utils.helpers import get_pointmap, compute_relative_pose_from_pointmaps, custom_collate, get_intrinsics_from_yaml, load_calibrations
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Generate pseudo-GT with relative pose, depth, intrinsics.')
@@ -19,23 +19,6 @@ def parse_args():
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--device', type=str, default='cuda')
     return parser.parse_args()
-
-def load_calibrations(calib_yaml):
-    with open(calib_yaml, "r") as f:
-        calib = yaml.safe_load(f)
-    return calib
-
-def get_intrinsics_from_yaml(calib, image_path):
-    """
-    if the filename contains 'fl_rgb', use 'left' intrinsics,
-    otherwise 'right'
-    """
-    base = os.path.basename(image_path).lower()
-    if "fl_rgb" in base:
-        intrinsics = np.array(calib["left"]["intrinsics"])
-    else:
-        intrinsics = np.array(calib["right"]["intrinsics"])
-    return intrinsics
 
 def main(args):
     # Load calibration
