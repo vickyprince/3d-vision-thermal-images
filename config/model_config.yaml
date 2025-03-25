@@ -2,7 +2,8 @@ data:
   train_path: "/home/nfs/inf6/data/datasets/ThermalDBs/Freiburg/train"
   val_path: "/home/nfs/inf6/data/datasets/ThermalDBs/Freiburg/val"
   test_path: "/home/nfs/inf6/data/datasets/ThermalDBs/Freiburg/test"
-  annotations_path: "data/annotations"
+  annotations_path: "/home/nfs/inf6/data/cudalab/victorv1/data"
+  verify_annotations_path: "/home/nfs/inf6/data/cudalab/victorv1/results/verify_annotations"
   img_width: 224
   img_height: 224
   num_workers: 4
@@ -12,11 +13,18 @@ device : "cuda"
 # Training configuration
 training:
   batch_size: 2
-  epochs: 10
-  lr: 1.0e-5
+  epochs: 500
+  lr: 1.0e-4
   weight_decay: 1.0e-5
   print_freq: 10
   save_freq: 5
+  warmup_epochs: 5
+  save_freq: 20
+  lr_init: 1e-4
+  lr_min: 1e-7
+  annotations_path: "/home/nfs/inf6/data/cudalab/victorv1/data"
+  results: "/home/nfs/inf6/data/cudalab/victorv1/results"
+
 
 # Evaluation configuration
 evaluation:

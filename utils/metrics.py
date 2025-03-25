@@ -1,30 +1,36 @@
-# utils/metrics.py
 import torch
 import numpy as np
 
 def compute_depth_metrics(pred, gt, mask=None):
     """
-    Compute depth estimation metrics
-    
+    Compute depth estimation metrics between predicted and ground truth depth maps.
+
+    Metrics computed:
+      - RMSE (Root Mean Squared Error)
+      - Abs Rel (Absolute Relative Error)
+      - Accuracy with thresholds δ < 1.25, δ < 1.25^2, δ < 1.25^3
+
     Args:
-        pred: Predicted depth map
-        gt: Ground truth depth map
-        mask: Optional mask for valid pixels
-        
+        pred (torch.Tensor): Predicted depth map.
+        gt (torch.Tensor): Ground truth depth map.
+        mask (torch.Tensor, optional): Boolean mask for valid pixels. If not provided, valid pixels are those where gt > 0.
+
     Returns:
-        Dictionary of metrics
+        dict: A dictionary containing:
+            'rmse': float,
+            'abs_rel': float,
+            'acc_1.25': float,
+            'acc_1.25^2': float,
+            'acc_1.25^3': float
     """
     if mask is None:
-        # Create mask for valid depth values
         mask = (gt > 0)
     else:
         mask = mask & (gt > 0)
-    
-    # Apply mask
+
     pred = pred[mask]
     gt = gt[mask]
-    
-    # If no valid pixels, return zeros
+
     if mask.sum() == 0:
         return {
             'rmse': 0.0,
@@ -33,21 +39,14 @@ def compute_depth_metrics(pred, gt, mask=None):
             'acc_1.25^2': 0.0,
             'acc_1.25^3': 0.0
         }
-    
-    # Compute metrics
+
     thresh = torch.maximum(pred / gt, gt / pred)
-    
-    # RMSE
     rmse = torch.sqrt(torch.mean((pred - gt) ** 2))
-    
-    # Absolute relative error
     abs_rel = torch.mean(torch.abs(pred - gt) / gt)
-    
-    # Accuracy metrics (δ < 1.25, 1.25², 1.25³)
     acc_1 = (thresh < 1.25).float().mean()
     acc_2 = (thresh < 1.25 ** 2).float().mean()
     acc_3 = (thresh < 1.25 ** 3).float().mean()
-    
+
     return {
         'rmse': rmse.item(),
         'abs_rel': abs_rel.item(),
