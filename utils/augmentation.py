@@ -4,14 +4,15 @@ import torchvision.transforms.functional as TF
 
 class ThermalAugmentation:
     """
-    Applies basic augmentation to thermal images.
+    Apply basic augmentation to thermal images.
+
+    This class adjusts brightness, contrast, adds Gaussian noise, and applies
+    a random horizontal flip to an input image tensor.
 
     Args:
-        brightness (float): Maximum relative brightness adjustment. A factor will be randomly chosen
-            from [1-brightness, 1+brightness].
-        contrast (float): Maximum relative contrast adjustment. A factor will be randomly chosen
-            from [1-contrast, 1+contrast].
-        noise (float): Standard deviation of additive Gaussian noise.
+        brightness (float): Maximum relative brightness adjustment. A factor is randomly chosen from [1 - brightness, 1 + brightness].
+        contrast (float): Maximum relative contrast adjustment. A factor is randomly chosen from [1 - contrast, 1 + contrast].
+        noise (float): Standard deviation of the additive Gaussian noise.
         flip_prob (float): Probability of applying a horizontal flip.
     """
     def __init__(self, brightness=0.2, contrast=0.2, noise=0.05, flip_prob=0.5):
@@ -22,10 +23,13 @@ class ThermalAugmentation:
 
     def __call__(self, img):
         """
+        Apply augmentations to the input image.
+
         Args:
-            img (torch.Tensor): Input image tensor of shape [C, H, W] with values assumed to be in [0, 1].
+            img (torch.Tensor): Input image tensor of shape [C, H, W] with values in [0, 1].
+
         Returns:
-            torch.Tensor: Augmented image.
+            torch.Tensor: Augmented image tensor.
         """
         # Random brightness adjustment
         if self.brightness > 0:
@@ -41,7 +45,6 @@ class ThermalAugmentation:
         if self.noise > 0:
             noise_tensor = torch.randn_like(img) * self.noise
             img = img + noise_tensor
-            # Optionally, clip values to [0, 1]
             img = torch.clamp(img, 0.0, 1.0)
         
         # Random horizontal flip
@@ -51,7 +54,6 @@ class ThermalAugmentation:
         return img
 
 if __name__ == "__main__":
-    # Test the augmentation
     import matplotlib.pyplot as plt
 
     # Create a dummy image tensor (3-channel, 256x256) with random values in [0, 1]
@@ -67,4 +69,5 @@ if __name__ == "__main__":
     axs[1].imshow(augmented_img.permute(1, 2, 0).numpy())
     axs[1].set_title("Augmented")
     axs[1].axis("off")
+    plt.tight_layout()
     plt.show()

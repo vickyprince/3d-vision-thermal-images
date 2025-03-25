@@ -8,8 +8,14 @@ import cv2
 
 def pad_to_multiple_tensor(img, multiple=16):
     """
-    Pads a 3D tensor (C, H, W) so that its H and W become multiples of `multiple`.
-    Returns the padded tensor.
+    Pad a 3D tensor (C, H, W) so that its height and width become multiples of the given value.
+
+    Args:
+        img (torch.Tensor): Input tensor of shape [C, H, W].
+        multiple (int): The multiple to pad the height and width to.
+
+    Returns:
+        torch.Tensor: The padded tensor.
     """
     _, H, W = img.shape
     new_H = ((H + multiple - 1) // multiple) * multiple
@@ -20,20 +26,25 @@ def pad_to_multiple_tensor(img, multiple=16):
     return padded
 
 class FreiburgTrainThermalDataset(Dataset):
+    """
+    Dataset for training DUSt3R with thermal images and pseudo annotations.
+    
+    Expected directory structure:
+        seq_XX_day/00/
+            fl_ir_aligned/   *.png
+            fl_rgb/          *.png
+
+    Args:
+        root_dir (str): Root directory of the dataset.
+        annotations_path (str): Directory containing pseudo annotations (.npy or .npz files).
+        transform (callable, optional): Transformation to apply to images.
+        augmentation (callable, optional): Augmentation to apply to images.
+        img_size (tuple): Target image size (width, height) for resizing.
+        show_progress (bool): If True, prints progress messages.
+        cache_file (str): Path to cache file to store sample metadata.
+    """
     def __init__(self, root_dir, annotations_path, transform=None, augmentation=None,
                  img_size=(224, 224), show_progress=False, cache_file="dataset_cache.pkl"):
-        """
-        Dataset for training DUSt3R with thermal images and pseudo annotations.
-        
-        Args:
-            root_dir (str): Path to the dataset root directory.
-            annotations_path (str): Path to the directory containing pseudo annotations (.npy files).
-            transform (callable, optional): Transform to be applied to images (e.g., normalization).
-            augmentation (callable, optional): Augmentation to be applied to images (e.g., random brightness, flip, etc.).
-            img_size (tuple): Target image size (width, height) for resizing.
-            show_progress (bool): Whether to print progress messages.
-            cache_file (str): Path to the cache file for storing sample metadata.
-        """
         self.root_dir = root_dir
         self.annotations_path = annotations_path
         self.img_size = img_size
@@ -45,7 +56,10 @@ class FreiburgTrainThermalDataset(Dataset):
         self._collect_samples()
 
     def _collect_samples(self):
-        # Check if cache exists
+        """
+        Collect sample file paths by matching pseudo annotation files with corresponding
+        thermal image pairs.
+        """
         if os.path.exists(self.cache_file):
             if self.show_progress:
                 print(f"Loading dataset cache from {self.cache_file} ...")
@@ -55,9 +69,7 @@ class FreiburgTrainThermalDataset(Dataset):
                 print(f"Loaded {len(self.samples)} samples from cache.")
             return
 
-        # Find all annotation files (match both npy and npz)
         annotation_files = sorted(glob.glob(os.path.join(self.annotations_path, "*.np*")))
-        
         if self.show_progress:
             from tqdm import tqdm
             annotation_files = tqdm(annotation_files, desc="Loading thermal dataset")
@@ -99,9 +111,29 @@ class FreiburgTrainThermalDataset(Dataset):
             print(f"Saved dataset cache to {self.cache_file}")
 
     def __len__(self):
+        """
+        Return the number of samples in the dataset.
+        """
         return len(self.samples)
 
     def __getitem__(self, idx):
+        """
+        Retrieve a sample by index.
+
+        Returns:
+            dict: A dictionary containing:
+                - 'img1': Thermal image tensor from first view.
+                - 'img2': Thermal image tensor from second view.
+                - 'gt_pointmap1': Ground-truth pointmap from first view.
+                - 'gt_pointmap2': Ground-truth pointmap from second view.
+                - 'gt_depth': Ground-truth depth map (as 1xHxW tensor).
+                - 'intrinsics': Camera intrinsics matrix as a tensor.
+                - 'pose1': Camera pose for the first view.
+                - 'pose2': Relative pose from first to second view.
+                - 'thermal_path1': Path to first thermal image.
+                - 'thermal_path2': Path to second thermal image.
+            Returns None if an error occurs.
+        """
         try:
             sample = self.samples[idx]
             thermal_path1 = sample['thermal_path1']
@@ -109,23 +141,20 @@ class FreiburgTrainThermalDataset(Dataset):
             annotation_path = sample['annotation_path']
 
             annotation = np.load(annotation_path, allow_pickle=True).item()
-            # Load thermal images
+
             thermal_img1 = self._load_thermal_image(thermal_path1)
             thermal_img2 = self._load_thermal_image(thermal_path2)
             
-            # Apply augmentation if provided
             if self.augmentation:
                 thermal_img1 = self.augmentation(thermal_img1)
                 thermal_img2 = self.augmentation(thermal_img2)
             
-            # Apply transform if provided
             if self.transform:
                 thermal_img1 = self.transform(thermal_img1)
                 thermal_img2 = self.transform(thermal_img2)
             
-            # Load pointmaps and additional info
-            pointmap1 = annotation['pointmap1']  # Expected shape: [3, H, W]
-            pointmap2 = annotation['pointmap2']  # Expected shape: [3, H, W]
+            pointmap1 = annotation['pointmap1']
+            pointmap2 = annotation['pointmap2']
             if pointmap1.shape[-1] == 3 and pointmap1.shape[0] != 3:
                 pointmap1 = pointmap1.transpose(2, 0, 1)
             if pointmap2.shape[-1] == 3 and pointmap2.shape[0] != 3:
@@ -133,12 +162,11 @@ class FreiburgTrainThermalDataset(Dataset):
 
             gt_pointmap1 = torch.from_numpy(pointmap1).float()
             gt_pointmap2 = torch.from_numpy(pointmap2).float()
-            
             depth_value_1 = annotation['depth_value_1']
             intrinsics = annotation['intrinsics']
             pose1 = annotation['pose1']
             pose2 = annotation['pose2']
-            
+
             if self.img_size:
                 h, w = thermal_img1.shape[1], thermal_img1.shape[2]
                 if gt_pointmap1.shape[1] != h or gt_pointmap1.shape[2] != w:
@@ -154,7 +182,6 @@ class FreiburgTrainThermalDataset(Dataset):
                     gt_pointmap1 = resized_pointmap1
                     gt_pointmap2 = resized_pointmap2
 
-                    # Handle depth_value_1 resizing more robustly
                     if depth_value_1 is None or not isinstance(depth_value_1, np.ndarray):
                         print(f"Warning: Invalid depth map in annotation {annotation_path}, using zeros.")
                         depth_value_1 = np.zeros((h, w), dtype=np.float32)
@@ -163,7 +190,6 @@ class FreiburgTrainThermalDataset(Dataset):
                         depth_value_1 = np.zeros((h, w), dtype=np.float32)
                     else:
                         try:
-                            # Make sure depth_value_1 is properly formatted for resizing
                             depth_value_1 = depth_value_1.astype(np.float32)
                             depth_value_1 = cv2.resize(depth_value_1, (w, h), interpolation=cv2.INTER_LINEAR)
                         except cv2.error as e:
@@ -171,30 +197,36 @@ class FreiburgTrainThermalDataset(Dataset):
                             depth_value_1 = np.zeros((h, w), dtype=np.float32)
             
             return {
-                'img1': thermal_img1,  # Tensor: [3, H, W]
-                'img2': thermal_img2,  # Tensor: [3, H, W]
-                'gt_pointmap1': gt_pointmap1,  # Tensor: [3, H, W]
-                'gt_pointmap2': gt_pointmap2,  # Tensor: [3, H, W]
-                'gt_depth': torch.from_numpy(depth_value_1).float().unsqueeze(0),  # Tensor: [1, H, W]
-                'intrinsics': torch.from_numpy(intrinsics).float(),  # Tensor: [3, 3]
-                'pose1': torch.from_numpy(pose1).float(),  # Tensor: [4, 4]
-                'pose2': torch.from_numpy(pose2).float(),  # Tensor: [4, 4]
+                'img1': thermal_img1,
+                'img2': thermal_img2,
+                'gt_pointmap1': gt_pointmap1,
+                'gt_pointmap2': gt_pointmap2,
+                'gt_depth': torch.from_numpy(depth_value_1).float().unsqueeze(0),
+                'intrinsics': torch.from_numpy(intrinsics).float(),
+                'pose1': torch.from_numpy(pose1).float(),
+                'pose2': torch.from_numpy(pose2).float(),
                 'thermal_path1': thermal_path1,
                 'thermal_path2': thermal_path2
             }
         except Exception as e:
             print(f"Error loading sample {idx}: {e}")
             return None
-    
+
     def _load_thermal_image(self, path):
         """
-        Loads a thermal image, converts it to a 3-channel tensor, resizes it, and pads it.
+        Load a thermal image, normalize, resize, and pad it.
+        
+        Args:
+            path (str): Path to the thermal image.
+        
+        Returns:
+            torch.Tensor: Processed thermal image tensor.
         """
         thermal_img = cv2.imread(path, cv2.IMREAD_ANYDEPTH)
         if thermal_img is None:
             raise RuntimeError(f"Failed to load thermal image: {path}")
         thermal_img = thermal_img.astype(np.float32)
-        thermal_img /= 65535.0  # Normalize assuming a 16-bit image.
+        thermal_img /= 65535.0
         thermal_img_3ch = np.stack([thermal_img, thermal_img, thermal_img], axis=-1)
         if self.img_size is not None:
             thermal_img_3ch = cv2.resize(thermal_img_3ch, self.img_size)

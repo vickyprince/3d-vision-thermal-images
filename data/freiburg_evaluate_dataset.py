@@ -6,6 +6,16 @@ import numpy as np
 from torch.utils.data import Dataset
 
 def pad_to_multiple_tensor(img, multiple=16):
+    """
+    Pad a 3D tensor (C, H, W) so that its height and width become multiples of `multiple`.
+
+    Args:
+        img (torch.Tensor): Input tensor with shape [C, H, W].
+        multiple (int): Desired multiple for height and width.
+
+    Returns:
+        torch.Tensor: Padded tensor.
+    """
     _, H, W = img.shape
     new_H = ((H + multiple - 1) // multiple) * multiple
     new_W = ((W + multiple - 1) // multiple) * multiple
@@ -15,20 +25,30 @@ def pad_to_multiple_tensor(img, multiple=16):
 
 class FreiburgEvaluateThermalDataset(Dataset):
     """
-    A dataset for evaluating monocular thermal depth estimation on the Freiburg dataset.
-    Expected structure:
+    Dataset for evaluating monocular thermal depth estimation on the Freiburg dataset.
+
+    Expected directory structure:
         test/
           day/
             ImagesIR/   *.png
-            ImagesRGB/  *.png   (optional, as reference)
-            Depth/      *.png   (optional, if available)
+            ImagesRGB/  *.png    (optional, as reference)
+            Depth/      *.png    (optional, if available)
           night/
             ImagesIR/   *.png
             ImagesRGB/  *.png
             Depth/      *.png
-    This version loads each IR image (and corresponding RGB image if available) individually.
+
+    This version loads each IR image (and corresponding RGB image, if available) individually.
     """
     def __init__(self, root_dir, transform=None, img_size=(224, 224)):
+        """
+        Initialize the dataset.
+
+        Args:
+            root_dir (str): Root directory of the dataset.
+            transform (callable, optional): Transformation to apply to images.
+            img_size (tuple, optional): Desired image size as (width, height).
+        """
         self.root_dir = root_dir
         self.transform = transform
         self.img_size = img_size
@@ -36,6 +56,9 @@ class FreiburgEvaluateThermalDataset(Dataset):
         self._collect_samples()
 
     def _collect_samples(self):
+        """
+        Collect sample file paths for IR, RGB, and (optionally) depth images.
+        """
         for condition in ["day", "night"]:
             condition_path = os.path.join(self.root_dir, condition)
             if not os.path.isdir(condition_path):
@@ -43,8 +66,7 @@ class FreiburgEvaluateThermalDataset(Dataset):
 
             ir_dir = os.path.join(condition_path, "ImagesIR")
             rgb_dir = os.path.join(condition_path, "ImagesRGB")
-            depth_dir = os.path.join(condition_path, "Depth")  # Optional
-            
+            depth_dir = os.path.join(condition_path, "Depth")  # Optional depth directory
             has_depth = os.path.isdir(depth_dir)
 
             if not os.path.isdir(ir_dir):
@@ -67,17 +89,34 @@ class FreiburgEvaluateThermalDataset(Dataset):
         print(f"Has depth GT: {any('depth_path' in s for s in self.samples)}")
 
     def __len__(self):
+        """Return the total number of samples."""
         return len(self.samples)
 
     def __getitem__(self, idx):
+        """
+        Retrieve a sample from the dataset.
+
+        Args:
+            idx (int): Index of the sample.
+
+        Returns:
+            dict: A dictionary containing:
+                - 'thermal': 3-channel thermal image as a torch.Tensor.
+                - 'thermal_path': Path to the thermal image.
+                - 'rgb': RGB image as a torch.Tensor (if available).
+                - 'rgb_path': Path to the RGB image (if available).
+                - 'gt_depth': Ground-truth depth as a torch.Tensor (if available).
+                - 'depth_path': Path to the depth image (if available).
+            Returns None if an error occurs.
+        """
         sample = self.samples[idx]
         ir_path = sample["thermal_path"]
 
-        # Load the IR image
+        # Load and normalize the IR image.
         ir_img = cv2.imread(ir_path, cv2.IMREAD_ANYDEPTH)
         if ir_img is None:
             raise RuntimeError(f"Failed to load IR image: {ir_path}")
-        ir_img = ir_img.astype(np.float32) / 65535.0  # Normalize (assumes 16-bit)
+        ir_img = ir_img.astype(np.float32) / 65535.0
         ir_img_3ch = np.stack([ir_img, ir_img, ir_img], axis=-1)
         if self.img_size is not None:
             w, h = self.img_size
@@ -87,12 +126,9 @@ class FreiburgEvaluateThermalDataset(Dataset):
         if self.transform:
             ir_tensor = self.transform(ir_tensor)
 
-        result = {
-            "thermal": ir_tensor,
-            "thermal_path": ir_path
-        }
-        
-        # Load RGB image if available (for reference)
+        result = {"thermal": ir_tensor, "thermal_path": ir_path}
+
+        # Load RGB image if available.
         if "rgb_path" in sample:
             rgb_path = sample["rgb_path"]
             rgb_img = cv2.imread(rgb_path, cv2.IMREAD_COLOR)
@@ -107,13 +143,13 @@ class FreiburgEvaluateThermalDataset(Dataset):
                 result["rgb"] = rgb_tensor
                 result["rgb_path"] = rgb_path
 
-        # Load depth if available
+        # Load depth image if available.
         if "depth_path" in sample:
             depth_path = sample["depth_path"]
             try:
                 depth_img = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH)
                 if depth_img is not None:
-                    depth_img = depth_img.astype(np.float32) / 1000.0  # Convert mm -> m, if applicable
+                    depth_img = depth_img.astype(np.float32) / 1000.0
                     if self.img_size is not None:
                         depth_img = cv2.resize(depth_img, (w, h))
                     depth_tensor = torch.from_numpy(depth_img).unsqueeze(0)
@@ -123,7 +159,7 @@ class FreiburgEvaluateThermalDataset(Dataset):
             except Exception as e:
                 print(f"Error loading depth {depth_path}: {e}")
 
-        # For backward compatibility: if RGB is not available, use IR
+        # Fallback: if RGB is not available, set it to the thermal image.
         if "rgb" not in result:
             result["rgb"] = ir_tensor
 
