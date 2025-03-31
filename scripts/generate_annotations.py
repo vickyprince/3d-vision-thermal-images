@@ -53,6 +53,8 @@ def main(args):
 
     # Load dataset and create a dataloader.
     from data.freiburg_dataset import FreiburgThermalDataset
+    # from data.test_annotaation_dataset import FreiburgThermalTestDataset    
+
     dataset = FreiburgThermalDataset(args.data_path)
     dataloader = DataLoader(
         dataset,
@@ -72,7 +74,12 @@ def main(args):
             paths = batch.get('rgb_path', [])
             thermal_paths = batch.get('thermal_path', [])
             if len(paths) < 2 or len(thermal_paths) < 1:
-                continue
+                if len(paths) < 2 and len(paths) == 1:
+                    print("Only one RGB image found; duplicating the image to create a pair.")
+                    images = torch.cat([images, images], dim=0)
+                    paths = paths * 2  # Duplicate the path list
+                else:
+                    continue
 
             img1 = images[0].to(args.device)
             img2 = images[1].to(args.device)
