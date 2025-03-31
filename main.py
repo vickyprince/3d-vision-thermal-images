@@ -23,12 +23,12 @@ def parse_args():
     parser.add_argument('--config', type=str, default='config/model_config.yaml',
                         help='Path to config file')
     parser.add_argument('--mode', type=str, required=True,
-                        choices=['generate_annotations', 'visualise', 'verify_annotations', 'train', 'evaluate', 'evaluate_ais', 'evaluate_combined'],
+                        choices=['generate_annotations', 'test_generate_annotations', 'visualise', 'verify_annotations', 'train', 'evaluate', 'evaluate_ais', 'evaluate_combined'],
                         help='Mode to run')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Path to checkpoint for evaluation or resuming training')
     parser.add_argument('--ft_checkpoint', type=str,
-                        default='/home/nfs/inf6/data/cudalab/victorv1/results/checkpoints/checkpoint_epoch_139.pth',
+                        default='/home/nfs/inf6/data/cudalab/victorv1/results/checkpoints/best.pth',
                         help='Path to fine-tuned DUSt3R checkpoint (for evaluate_combined)')
     parser.add_argument('--base_checkpoint', type=str,
                         default='checkpoints/DUSt3R_ViTLarge_BaseDecoder_224_linear.pth',
@@ -88,6 +88,19 @@ def main(args):
         )
         generate_annotations_main(generate_args)
     
+    elif args.mode == 'test_generate_annotations':
+        from scripts.generate_annotations import main as generate_annotations_main
+        device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+        generate_args = argparse.Namespace(
+            data_path=config['data']['test_path'],
+            output_path="/home/nfs/inf6/data/cudalab/victorv1/test_data",
+            calib_yaml="config/calibrations/thermal_stereo_calib.yaml",
+            batch_size=1,
+            num_workers=4,
+            device=device
+        )
+        generate_annotations_main(generate_args)
+    
     elif args.mode == 'verify_annotations':
         from scripts.verify_annotations import main as verify_annotations
         device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -121,8 +134,9 @@ def main(args):
             base_checkpoint=args.base_checkpoint,
             calib_yaml="config/calibrations/thermal_stereo_calib.yaml",
             ma_checkpoint=args.ma_checkpoint,
+            annotations_path="/home/nfs/inf6/data/cudalab/victorv1/test_data/",
             output_dir=os.path.join(args.output_dir, 'eval_results'),
-            vis_samples=50
+            vis_samples=64
         )
         evaluate_main(evaluate_args)
         

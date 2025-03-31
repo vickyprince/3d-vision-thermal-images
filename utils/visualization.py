@@ -253,3 +253,33 @@ def visualize_pointcloud(depth_map1, depth_map2, intrinsics, out_path="compariso
         plt.savefig(out_path, bbox_inches='tight', pad_inches=0.1)
         print(f"Saved combined point cloud visualization: {out_path}")
     plt.close(fig)
+
+
+def visualize_qualitative_evaluation(gt_depth, pred_depth, metrics, out_path=None):
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    ax1, ax2 = axes
+
+    # Display the ground truth depth image on the left.
+    im1 = ax1.imshow(gt_depth, cmap='viridis')
+    ax1.set_title('Ground Truth Depth')
+    fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+
+    # Display the predicted depth image on the right.
+    im2 = ax2.imshow(pred_depth, cmap='viridis')
+    ax2.set_title('Predicted Depth (Fine-tuned DUSt3R)')
+    fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+
+    # Prepare metrics text.
+    metric_text = "\n".join([f"{k}: {v:.4f}" for k, v in metrics.items()])
+    # Place metrics at the lower left so they don't hide the main part of the image.
+    ax2.text(0.05, 0.05, metric_text, transform=ax2.transAxes,
+             fontsize=12, verticalalignment='bottom', color='white',
+             bbox=dict(facecolor='black', alpha=0.6))
+
+    plt.tight_layout()
+    if out_path:
+        plt.savefig(out_path)
+        print(f"Saved qualitative evaluation visualization: {out_path}")
+    plt.close(fig)
